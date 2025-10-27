@@ -12,7 +12,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_works_with_redis() {
-        let container = GenericImage::new("ghcr.io/rustworthy/redis-cell", "8.2.2-0.4.0")
+        let container = GenericImage::new("redis-cell", "latest")
             .with_exposed_port(6379.tcp())
             .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
             .start()
@@ -43,7 +43,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_works_with_valkey() {
-        let container = GenericImage::new("ghcr.io/rustworthy/valkey-cell", "9.0.0-0.4.0")
+        let container = GenericImage::new("valkey-cell", "latest")
             .with_exposed_port(6379.tcp())
             .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
             .start()

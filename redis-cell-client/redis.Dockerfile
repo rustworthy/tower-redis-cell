@@ -1,21 +1,16 @@
-FROM redis:8.2.2
+################################ BUILDER ######################################
+FROM rust:1.89-bookworm AS builder
 
-ARG CELL_VERSION=0.4.0
+WORKDIR /redis-cell
 
-RUN apt-get -y update && apt-get -y upgrade && \
-  apt-get -y install wget ca-certificates --no-install-recommends && \
-  rm -rf /var/lib/apt/lists/*
+RUN git clone -b valkey https://github.com/rustworthy/redis-cell.git .
+RUN cargo build --release
 
+################################ RUNTIME ######################################
+FROM redis:8.2.2-bookworm AS runtime
 
-RUN mkdir /tmp/redis-cell && \
-  wget -qO /tmp/redis-cell/redis-cell.tar.gz "https://github.com/brandur/redis-cell/releases/download/v${CELL_VERSION}/redis-cell-v${CELL_VERSION}-x86_64-unknown-linux-gnu.tar.gz" && \
-  tar zxf /tmp/redis-cell/redis-cell.tar.gz --directory=/tmp/redis-cell && \
-  # redis will auto-load modules located in "/usr/local/lib/redis/modules"
-  mv /tmp/redis-cell/libredis_cell.so "/usr/local/lib/redis/modules/libredis_cell-v${CELL_VERSION}.so" && \
-  rm -r /tmp/redis-cell
+COPY --from=builder /redis-cell/target/release/libredis_cell.so /usr/local/lib/redis/modules/libredis_cell.so
 
 USER redis
 
 CMD ["redis-server"]
-
-
