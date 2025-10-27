@@ -1,0 +1,7 @@
+[package]
+name = "tower-cell"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+redis-cell-client = { path = "../redis-cell-client" }
