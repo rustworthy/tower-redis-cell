@@ -40,12 +40,15 @@ impl<S, Ex> RateLimit<S, Ex> {
     }
 }
 
-impl<S, Ex, ReqTy> tower::Service<ReqTy> for RateLimit<S, Ex>
+impl<S, Ex, E, ReqTy> tower::Service<ReqTy> for RateLimit<S, Ex>
 where
     S: tower::Service<ReqTy> + Clone + Send + 'static,
-    Ex: ExtractKey<Request = ReqTy>,
-    ReqTy: Send + 'static,
     S::Future: Send + 'static,
+    ReqTy: Send + 'static,
+    Ex: ExtractKey<Request = ReqTy, Error = E>,
+    E: Into<S::Error>,
+    S::Error: Send,
+    S::Response: Send,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -60,9 +63,9 @@ where
 
     fn call(&mut self, req: ReqTy) -> Self::Future {
         // XXX: into response please
-        let Ok(key) = self.config.extractor.extract(&req) else {
-            // not using unwrap to postpone imposing bounds (Debug in this case);
-            todo!();
+        let key = match self.config.extractor.extract(&req) {
+            Ok(key) => key,
+            Err(e) => return Box::pin(std::future::ready(Err(e.into()))),
         };
         let cmd = Cmd::new(&key, &self.config.policy);
         let cmd: RedisCmd = cmd.into();
@@ -70,8 +73,11 @@ where
         let mut connection = self.connection.clone();
         let mut inner = self.inner.clone();
         Box::pin(async move {
-            let res = connection.send_packed_command(&cmd).await;
-            dbg!(&res);
+            let res = connection.send_packed_command(&cmd).await.unwrap();
+            let res = res.into_sequence().unwrap();
+            let (throttled, total, remaining, restry_after_sesc, reset_after_secs) =
+                (&res[0], &res[1], &res[2], &res[3], &res[4]);
+            dbg!(&res, &throttled);
             inner.call(req).await
         })
     }

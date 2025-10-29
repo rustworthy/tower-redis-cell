@@ -11,8 +11,10 @@ use tower_rate_limit::{ExtractKey, Policy, RateLimit, RateLimitConfig};
 #[derive(Clone)]
 struct IpExtractor;
 
+struct MyError;
+
 impl ExtractKey for IpExtractor {
-    type Error = Infallible;
+    type Error = MyError;
     type Request = Request<Body>;
     fn extract<'a>(
         &self,
@@ -57,7 +59,7 @@ async fn main() {
         async move {
             let svc = service_fn(hello_world);
             let svc = RateLimit::new(svc, config, manager);
-            Ok::<_, Infallible>(svc)
+            Ok::<_, MyError>(svc)
         }
     });
 
