@@ -1,8 +1,10 @@
+use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 use std::borrow::{self, Cow};
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use testcontainers::core::IntoContainerPort as _;
 use testcontainers::runners::AsyncRunner;
@@ -59,15 +61,19 @@ async fn main() {
         .tokens(1usize)
         .period(Duration::from_secs(3))
         .build();
-    let config = RateLimitConfig::new(
-        IpExtractor,
-        policy,
-        || AppError("rate-limited".to_string()),
-        |resp| resp,
-    );
+    let config = RateLimitConfig::new(IpExtractor, policy, || AppError("rate-limited".to_string()))
+        .set_success_handler(|mut resp: Response<Body>| {
+            let headers = resp.headers_mut();
+            headers.insert(
+                "x-inserted-by_success-handler",
+                HeaderValue::from_static("<3"),
+            );
+            resp
+        });
+    let config = Arc::new(config);
 
     let svc = make_service_fn(|_conn| {
-        let config = config.clone();
+        let config = Arc::clone(&config);
         let manager = manager.clone();
         async move {
             let svc = service_fn(hello_world);

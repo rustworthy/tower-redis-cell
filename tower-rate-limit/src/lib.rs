@@ -1,6 +1,6 @@
 use redis::Cmd as RedisCmd;
 use redis::aio::ConnectionManager;
-use std::{borrow::Cow, pin::Pin};
+use std::{borrow::Cow, pin::Pin, sync::Arc};
 
 pub use redis_cell_client::{Cmd, Policy, PolicyBuilder};
 
@@ -11,35 +11,49 @@ pub trait ExtractKey<R> {
 }
 
 #[derive(Clone)]
-pub struct RateLimitConfig<Ex, EH, SH> {
+enum SuccessHandler<RespTy> {
+    Noop,
+    Handler(Arc<dyn Fn(RespTy) -> RespTy + Send + Sync + 'static>),
+}
+
+#[derive(Clone)]
+pub struct RateLimitConfig<Ex, EH, RespTy> {
     extractor: Ex,
     policy: Policy,
     error: EH,
-    success: SH,
+    success: SuccessHandler<RespTy>,
 }
 
-impl<Ex, EH, SH> RateLimitConfig<Ex, EH, SH> {
-    pub fn new(extractor: Ex, policy: Policy, error_handler: EH, success_handler: SH) -> Self {
+impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
+    pub fn new(extractor: Ex, policy: Policy, error_handler: EH) -> Self {
         RateLimitConfig {
             extractor,
             policy,
             error: error_handler,
-            success: success_handler,
+            success: SuccessHandler::Noop,
         }
+    }
+
+    pub fn set_success_handler<H>(mut self, handler: H) -> Self
+    where
+        H: Fn(RespTy) -> RespTy + Send + Sync + 'static,
+    {
+        self.success = SuccessHandler::Handler(Arc::new(handler));
+        self
     }
 }
 
 #[derive(Clone)]
-pub struct RateLimit<S, Ex, EH, SH> {
+pub struct RateLimit<S, Ex, EH, RespTy> {
     inner: S,
-    config: RateLimitConfig<Ex, EH, SH>,
+    config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
     connection: ConnectionManager,
 }
 
 impl<S, Ex, EH, SH> RateLimit<S, Ex, EH, SH> {
     pub fn new(
         inner: S,
-        config: RateLimitConfig<Ex, EH, SH>,
+        config: Arc<RateLimitConfig<Ex, EH, SH>>,
         connection: ConnectionManager,
     ) -> Self {
         RateLimit {
@@ -50,18 +64,18 @@ impl<S, Ex, EH, SH> RateLimit<S, Ex, EH, SH> {
     }
 }
 
-impl<S, Ex, E, EH, SH, ReqTy, RespTy> tower::Service<ReqTy> for RateLimit<S, Ex, EH, SH>
+impl<S, Ex, E, EH, RespTy, ReqTy, IntoRespTy> tower::Service<ReqTy> for RateLimit<S, Ex, EH, RespTy>
 where
-    S: tower::Service<ReqTy> + Clone + Send + 'static,
+    S: tower::Service<ReqTy, Response = RespTy> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Send,
     S::Response: Send,
-    Ex: ExtractKey<ReqTy, Error = E> + Clone,
+    Ex: ExtractKey<ReqTy, Error = E> + Clone + Send + Sync + 'static,
     E: Into<S::Response>,
     ReqTy: Send + 'static,
-    EH: Fn() -> RespTy + Clone + Send + 'static,
-    RespTy: Into<S::Response>,
-    SH: Fn(S::Response) -> S::Response + Clone + Send + 'static,
+    EH: Fn() -> IntoRespTy + Clone + Send + Sync + 'static,
+    IntoRespTy: Into<S::Response>,
+    RespTy: 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -96,10 +110,10 @@ where
             if *throttled == redis::Value::Int(1) {
                 return Ok((config.error)().into());
             }
-            match inner.call(req).await {
-                Err(e) => Err(e),
-                Ok(resp) => Ok((config.success)(resp)),
-            }
+            inner.call(req).await.map(|resp| match &config.success {
+                SuccessHandler::Noop => resp,
+                SuccessHandler::Handler(h) => h(resp),
+            })
         })
     }
 }
