@@ -57,9 +57,14 @@ async fn main() {
     let policy = Policy::builder()
         .burst(0usize)
         .tokens(1usize)
-        .period(Duration::from_secs(1))
+        .period(Duration::from_secs(3))
         .build();
-    let config = RateLimitConfig::<_, _, Option<()>>::new(IpExtractor, policy, || AppError("rate-limited".to_string()) , None);
+    let config = RateLimitConfig::new(
+        IpExtractor,
+        policy,
+        || AppError("rate-limited".to_string()),
+        |resp| resp,
+    );
 
     let svc = make_service_fn(|_conn| {
         let config = config.clone();

@@ -61,7 +61,7 @@ where
     ReqTy: Send + 'static,
     EH: Fn() -> RespTy + Clone + Send + 'static,
     RespTy: Into<S::Response>,
-    SH: Clone,
+    SH: Fn(S::Response) -> S::Response + Clone + Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -96,9 +96,10 @@ where
             if *throttled == redis::Value::Int(1) {
                 return Ok((config.error)().into());
             }
-
-            let resp = inner.call(req).await;
-            resp
+            match inner.call(req).await {
+                Err(e) => Err(e),
+                Ok(resp) => Ok((config.success)(resp)),
+            }
         })
     }
 }
