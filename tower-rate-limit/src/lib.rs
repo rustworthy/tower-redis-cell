@@ -2,11 +2,10 @@ use redis::Cmd as RedisCmd;
 use redis::aio::ConnectionManager;
 use std::{borrow::Cow, pin::Pin};
 
-pub trait ExtractKey {
+pub trait ExtractKey<R> {
     type Error;
-    type Request;
 
-    fn extract<'a>(&self, req: &'a Self::Request) -> Result<Cow<'a, str>, Self::Error>;
+    fn extract<'a>(&self, req: &'a R) -> Result<Cow<'a, str>, Self::Error>;
 }
 
 pub use redis_cell_client::{Cmd, Policy, PolicyBuilder};
@@ -46,7 +45,7 @@ where
     S::Future: Send + 'static,
     S::Error: Send,
     S::Response: Send,
-    Ex: ExtractKey<Request = ReqTy, Error = E>,
+    Ex: ExtractKey<ReqTy, Error = E>,
     E: Into<S::Response>,
     ReqTy: Send + 'static,
 {

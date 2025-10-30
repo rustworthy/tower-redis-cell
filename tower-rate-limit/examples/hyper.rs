@@ -1,5 +1,6 @@
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
+use std::borrow::{self, Cow};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -20,27 +21,9 @@ impl From<AppError> for Response<Body> {
     }
 }
 
-impl ExtractKey for IpExtractor {
+impl<T> ExtractKey<Request<T>> for IpExtractor {
     type Error = AppError;
-    type Request = Request<Body>;
-    fn extract<'a>(
-        &self,
-        req: &'a Self::Request,
-    ) -> Result<std::borrow::Cow<'a, str>, Self::Error> {
-        req.headers()
-            .get("x-api-key")
-            .and_then(|val| val.to_str().ok())
-            .map(Into::into)
-            .ok_or(AppError("'x-api-key' header is missing".to_string()))
-    }
-}
-impl ExtractKey for IpExtractor {
-    type Error = String;
-    type Request = Request<Body>;
-    fn extract<'a>(
-        &self,
-        req: &'a Self::Request,
-    ) -> Result<std::borrow::Cow<'a, str>, Self::Error> {
+    fn extract<'a>(&self, req: &'a Request<T>) -> Result<Cow<'a, str>, Self::Error> {
         req.headers()
             .get("x-api-key")
             .and_then(|val| val.to_str().ok())
