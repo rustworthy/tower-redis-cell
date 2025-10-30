@@ -1,5 +1,5 @@
-use redis::Cmd as RedisCmd;
 use redis::aio::ConnectionManager;
+use redis::{Cmd as RedisCmd, Value};
 use std::{borrow::Cow, pin::Pin, sync::Arc};
 
 pub use redis_cell_client::{Cmd, Policy, PolicyBuilder};
@@ -8,6 +8,29 @@ pub trait ExtractKey<R> {
     type Error;
 
     fn extract<'a>(&self, req: &'a R) -> Result<Cow<'a, str>, Self::Error>;
+}
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct ExtractKeyError {
+    pub detail: Option<Cow<'static, str>>,
+}
+
+impl ExtractKeyError {
+    pub fn with_detail(detail: Cow<'static, str>) -> Self {
+        ExtractKeyError {
+            detail: Some(detail),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum Error {
+    Extract(ExtractKeyError),
+    Throttle(i64, i64, i64, i64),
+    Redis,
+    Protocol,
 }
 
 #[derive(Clone)]
@@ -34,7 +57,7 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
         }
     }
 
-    pub fn set_success_handler<H>(mut self, handler: H) -> Self
+    pub fn on_success<H>(mut self, handler: H) -> Self
     where
         H: Fn(RespTy) -> RespTy + Send + Sync + 'static,
     {
@@ -71,10 +94,10 @@ where
     S::Error: Send,
     S::Response: Send,
     Ex: ExtractKey<ReqTy, Error = E> + Clone + Send + Sync + 'static,
-    E: Into<S::Response>,
+    E: Into<ExtractKeyError>,
     ReqTy: Send + 'static,
-    EH: Fn() -> IntoRespTy + Clone + Send + Sync + 'static,
-    IntoRespTy: Into<S::Response>,
+    EH: Fn(Error, ReqTy) -> IntoRespTy + Clone + Send + Sync + 'static,
+    IntoRespTy: Into<RespTy>,
     RespTy: 'static,
 {
     type Response = S::Response;
@@ -92,7 +115,9 @@ where
         let key = match self.config.extractor.extract(&req) {
             Ok(key) => key,
             Err(e) => {
-                return Box::pin(std::future::ready(Ok(e.into())));
+                let e = Error::Extract(e.into());
+                let resp = (self.config.error)(e, req);
+                return Box::pin(std::future::ready(Ok(resp.into())));
             }
         };
         let cmd = Cmd::new(&key, &self.config.policy);
@@ -104,11 +129,22 @@ where
         Box::pin(async move {
             let res = connection.send_packed_command(&cmd).await.unwrap();
             let res = res.into_sequence().unwrap();
-            let (throttled, total, remaining, restry_after_sesc, reset_after_secs) =
-                (&res[0], &res[1], &res[2], &res[3], &res[4]);
-            dbg!(&res, &throttled);
-            if *throttled == redis::Value::Int(1) {
-                return Ok((config.error)().into());
+            let (
+                Value::Int(throttled),
+                Value::Int(total),
+                Value::Int(remaining),
+                Value::Int(retry_after_sesc),
+                Value::Int(reset_after_secs),
+            ) = (&res[0], &res[1], &res[2], &res[3], &res[4])
+            else {
+                todo!();
+            };
+            if *throttled == 1 {
+                let handled = (config.error)(
+                    Error::Throttle(*total, *remaining, *retry_after_sesc, *reset_after_secs),
+                    req,
+                );
+                return Ok(handled.into());
             }
             inner.call(req).await.map(|resp| match &config.success {
                 SuccessHandler::Noop => resp,

@@ -1,7 +1,7 @@
 use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
-use std::borrow::{self, Cow};
+use std::borrow::Cow;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -9,7 +9,7 @@ use std::time::Duration;
 use testcontainers::core::IntoContainerPort as _;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{GenericImage, core::WaitFor};
-use tower_rate_limit::{ExtractKey, Policy, RateLimit, RateLimitConfig};
+use tower_rate_limit::{Error, ExtractKey, ExtractKeyError, Policy, RateLimit, RateLimitConfig};
 
 #[derive(Clone)]
 struct IpExtractor;
@@ -24,13 +24,15 @@ impl From<AppError> for Response<Body> {
 }
 
 impl<T> ExtractKey<Request<T>> for IpExtractor {
-    type Error = AppError;
+    type Error = ExtractKeyError;
     fn extract<'a>(&self, req: &'a Request<T>) -> Result<Cow<'a, str>, Self::Error> {
         req.headers()
             .get("x-api-key")
             .and_then(|val| val.to_str().ok())
             .map(Into::into)
-            .ok_or(AppError("'x-api-key' header is missing".to_string()))
+            .ok_or(ExtractKeyError::with_detail(
+                "'x-api-key' header is missing".into(),
+            ))
     }
 }
 
@@ -61,15 +63,20 @@ async fn main() {
         .tokens(1usize)
         .period(Duration::from_secs(3))
         .build();
-    let config = RateLimitConfig::new(IpExtractor, policy, || AppError("rate-limited".to_string()))
-        .set_success_handler(|mut resp: Response<Body>| {
-            let headers = resp.headers_mut();
-            headers.insert(
-                "x-inserted-by_success-handler",
-                HeaderValue::from_static("<3"),
-            );
-            resp
-        });
+    let config = RateLimitConfig::new(IpExtractor, policy, |err, _req| match err {
+        Error::Throttle(total, remaining, retry_after, reset_after) => {
+            AppError("rate-limited".to_string())
+        }
+        _ => todo!(),
+    })
+    .on_success(|mut resp: Response<Body>| {
+        let headers = resp.headers_mut();
+        headers.insert(
+            "x-inserted-by-success-handler",
+            HeaderValue::from_static("<3"),
+        );
+        resp
+    });
     let config = Arc::new(config);
 
     let svc = make_service_fn(|_conn| {
