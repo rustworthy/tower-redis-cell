@@ -71,13 +71,12 @@ async fn main() {
         Error::Redis(err) => AppError(format!("internal server error: {:?}", err.detail())),
         _ => AppError("internal server error".into()),
     })
-    .on_success(|_details, mut resp: Response<Body>| {
+    .on_success(|_details, resp: &mut Response<Body>| {
         let headers = resp.headers_mut();
         headers.insert(
             "x-inserted-by-success-handler",
             HeaderValue::from_static("<3"),
         );
-        resp
     });
     let config = Arc::new(config);
 

@@ -18,7 +18,7 @@ pub trait ExtractKey<R> {
 #[derive(Clone)]
 enum SuccessHandler<RespTy> {
     Noop,
-    Handler(Arc<dyn Fn(AllowedDetails, RespTy) -> RespTy + Send + Sync + 'static>),
+    Handler(Arc<dyn Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static>),
 }
 
 #[derive(Clone)]
@@ -41,7 +41,7 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
 
     pub fn on_success<H>(mut self, handler: H) -> Self
     where
-        H: Fn(AllowedDetails, RespTy) -> RespTy + Send + Sync + 'static,
+        H: Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static,
     {
         self.success = SuccessHandler::Handler(Arc::new(handler));
         self
@@ -128,9 +128,12 @@ where
                     Ok(handled.into())
                 }
                 Verdict::Allowed(details) => {
-                    inner.call(req).await.map(|resp| match &config.success {
+                    inner.call(req).await.map(|mut resp| match &config.success {
                         SuccessHandler::Noop => resp,
-                        SuccessHandler::Handler(h) => h(details, resp),
+                        SuccessHandler::Handler(h) => {
+                            h(details, &mut resp);
+                            resp
+                        }
                     })
                 }
             }
