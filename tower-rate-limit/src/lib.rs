@@ -1,6 +1,7 @@
 use redis::Cmd as RedisCmd;
 use redis::aio::ConnectionManager;
 use std::{borrow::Cow, pin::Pin, sync::Arc};
+use tower::Layer;
 
 mod error;
 
@@ -8,6 +9,8 @@ pub use error::{Error, ExtractKeyError};
 pub use redis_cell_rs as redis_cell;
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
+
+type ReponseEnricher<RespTy> = Arc<dyn Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static>;
 
 pub trait ExtractKey<R> {
     type Error;
@@ -18,15 +21,15 @@ pub trait ExtractKey<R> {
 #[derive(Clone)]
 enum SuccessHandler<RespTy> {
     Noop,
-    Handler(Arc<dyn Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static>),
+    Handler(ReponseEnricher<RespTy>),
 }
 
 #[derive(Clone)]
 pub struct RateLimitConfig<Ex, EH, RespTy> {
     extractor: Ex,
     policy: Policy,
-    error: EH,
-    success: SuccessHandler<RespTy>,
+    error_handler: EH,
+    success_handler: SuccessHandler<RespTy>,
 }
 
 impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
@@ -34,8 +37,8 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
         RateLimitConfig {
             extractor,
             policy,
-            error: error_handler,
-            success: SuccessHandler::Noop,
+            error_handler,
+            success_handler: SuccessHandler::Noop,
         }
     }
 
@@ -43,11 +46,12 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
     where
         H: Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static,
     {
-        self.success = SuccessHandler::Handler(Arc::new(handler));
+        self.success_handler = SuccessHandler::Handler(Arc::new(handler));
         self
     }
 }
 
+// ############################## SERVICE ####################################
 #[derive(Clone)]
 pub struct RateLimit<S, Ex, EH, RespTy> {
     inner: S,
@@ -98,7 +102,7 @@ where
             Ok(key) => key,
             Err(e) => {
                 let e = Error::Extract(e.into());
-                let resp = (self.config.error)(e, req);
+                let resp = (self.config.error_handler)(e, req);
                 return Box::pin(std::future::ready(Ok(resp.into())));
             }
         };
@@ -111,32 +115,60 @@ where
             let redis_response = match connection.send_packed_command(&cmd).await {
                 Ok(res) => res,
                 Err(redis) => {
-                    let handled = (config.error)(Error::Redis(Arc::new(redis)), req);
+                    let handled = (config.error_handler)(Error::Redis(Arc::new(redis)), req);
                     return Ok(handled.into());
                 }
             };
             let redis_cell_verdict: Verdict = match redis_response.try_into() {
                 Ok(verdict) => verdict,
                 Err(message) => {
-                    let handled = (config.error)(Error::Protocol(message), req);
+                    let handled = (config.error_handler)(Error::Protocol(message), req);
                     return Ok(handled.into());
                 }
             };
             match redis_cell_verdict {
                 Verdict::Blocked(details) => {
-                    let handled = (config.error)(Error::Throttle(details), req);
+                    let handled = (config.error_handler)(Error::Throttle(details), req);
                     Ok(handled.into())
                 }
                 Verdict::Allowed(details) => {
-                    inner.call(req).await.map(|mut resp| match &config.success {
-                        SuccessHandler::Noop => resp,
-                        SuccessHandler::Handler(h) => {
-                            h(details, &mut resp);
-                            resp
-                        }
-                    })
+                    inner
+                        .call(req)
+                        .await
+                        .map(|mut resp| match &config.success_handler {
+                            SuccessHandler::Noop => resp,
+                            SuccessHandler::Handler(h) => {
+                                h(details, &mut resp);
+                                resp
+                            }
+                        })
                 }
             }
         })
+    }
+}
+
+// ############################## LAYER ######################################
+pub struct RateLimitLayer<Ex, EH, RespTy> {
+    config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
+    connection: ConnectionManager,
+}
+
+impl<S, Ex, EH, RespTy> Layer<S> for RateLimitLayer<Ex, EH, RespTy> {
+    type Service = RateLimit<S, Ex, EH, RespTy>;
+    fn layer(&self, inner: S) -> Self::Service {
+        RateLimit::new(inner, Arc::clone(&self.config), self.connection.clone())
+    }
+}
+
+impl<Ex, EH, RespTy> RateLimitLayer<Ex, EH, RespTy> {
+    pub fn new<C>(config: C, connection: ConnectionManager) -> Self
+    where
+        C: Into<Arc<RateLimitConfig<Ex, EH, RespTy>>>,
+    {
+        RateLimitLayer {
+            config: config.into(),
+            connection,
+        }
     }
 }
