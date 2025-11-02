@@ -47,6 +47,9 @@ pub enum Error {
     #[error("extraction: {0}")]
     Extract(ExtractKeyError),
 
+    #[error("failed to apply rule: {0}")]
+    Rule(String),
+
     #[error(transparent)]
     RedisCell(RedisCellError),
 

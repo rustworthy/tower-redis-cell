@@ -3,24 +3,28 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
 use http::header::RETRY_AFTER;
-use std::borrow::Cow;
+use std::collections::HashMap;
 use std::time::Duration;
 use tower_rate_limit::redis_cell::Policy;
-use tower_rate_limit::{Error, ExtractKey, ExtractKeyError, RateLimitConfig, RateLimitLayer};
+use tower_rate_limit::{
+    Error, ExtractKeyError, ExtractRule, RateLimitConfig, RateLimitLayer, Rule,
+};
 
 #[derive(Clone)]
 struct ApiKeyExtractor;
 
-impl<T> ExtractKey<Request<T>> for ApiKeyExtractor {
+impl<T> ExtractRule<Request<T>> for ApiKeyExtractor {
     type Error = ExtractKeyError;
-    fn extract<'a>(&self, req: &'a Request<T>) -> Result<Cow<'a, str>, Self::Error> {
-        req.headers()
+    fn extract<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, Self::Error> {
+        let key = req
+            .headers()
             .get("x-api-key")
             .and_then(|val| val.to_str().ok())
             .map(Into::into)
             .ok_or(ExtractKeyError::with_detail(
                 "'x-api-key' header is missing".into(),
-            ))
+            ))?;
+        Ok(Some(Rule::new(key, "basic")))
     }
 }
 
@@ -30,17 +34,18 @@ async fn main() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // launch a contaier with
+    // launch a contaier with Valkey (with Redis Cell module)
     let (_container, port) = utils::launch_redis_container().await;
     let connection = utils::build_connection_manager(port).await;
 
-    let policy = Policy::builder()
+    let basic_policy = Policy::builder()
         .burst(0usize)
         .tokens(1usize)
         .period(Duration::from_secs(3))
         .build();
+    let policies = HashMap::from([("basic".to_string(), basic_policy)]);
 
-    let config = RateLimitConfig::new(ApiKeyExtractor, policy, |err, _req| {
+    let config = RateLimitConfig::new(ApiKeyExtractor, policies, |err, _req| {
         match err {
             Error::Throttle(details) => {
                 // trace event
@@ -48,10 +53,15 @@ async fn main() {
                     StatusCode::TOO_MANY_REQUESTS,
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
                     AppendHeaders([(RETRY_AFTER, details.retry_after)]),
+                    Body::from("too many requests"),
                 )
                     .into_response()
             }
             Error::Extract(err) => (StatusCode::UNAUTHORIZED, err.to_string()).into_response(),
+            Error::Rule(err) => {
+                tracing::error!(err = %err, "error in rate limit layer");
+                (StatusCode::INTERNAL_SERVER_ERROR).into_response()
+            }
             Error::RedisCell(err) => {
                 tracing::error!(err = %err, "error in rate limit layer");
                 (StatusCode::INTERNAL_SERVER_ERROR).into_response()
@@ -61,7 +71,7 @@ async fn main() {
                 (StatusCode::INTERNAL_SERVER_ERROR).into_response()
             }
             _ => {
-                tracing::error!("error in rate limit layer");
+                tracing::error!("unexpected error in rate limit layer");
                 (StatusCode::INTERNAL_SERVER_ERROR).into_response()
             }
         }

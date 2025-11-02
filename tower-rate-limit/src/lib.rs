@@ -1,5 +1,5 @@
 use redis::{Cmd as RedisCmd, aio::ConnectionLike};
-use std::{borrow::Cow, pin::Pin, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, pin::Pin, sync::Arc};
 use tower::Layer;
 
 mod error;
@@ -11,10 +11,22 @@ use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
 
 type ReponseEnricher<RespTy> = Arc<dyn Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static>;
 
-pub trait ExtractKey<R> {
+#[derive(Debug, Clone)]
+pub struct Rule<'a> {
+    key: Cow<'a, str>,
+    policy_name: &'a str,
+}
+
+impl<'a> Rule<'a> {
+    pub fn new(key: Cow<'a, str>, policy_name: &'a str) -> Self {
+        Self { key, policy_name }
+    }
+}
+
+pub trait ExtractRule<R> {
     type Error;
 
-    fn extract<'a>(&self, req: &'a R) -> Result<Cow<'a, str>, Self::Error>;
+    fn extract<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
 }
 
 #[derive(Clone)]
@@ -26,16 +38,16 @@ enum SuccessHandler<RespTy> {
 #[derive(Clone)]
 pub struct RateLimitConfig<Ex, EH, RespTy> {
     extractor: Ex,
-    policy: Policy,
+    policies: HashMap<String, Policy>,
     error_handler: EH,
     success_handler: SuccessHandler<RespTy>,
 }
 
 impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
-    pub fn new(extractor: Ex, policy: Policy, error_handler: EH) -> Self {
+    pub fn new(extractor: Ex, policies: HashMap<String, Policy>, error_handler: EH) -> Self {
         RateLimitConfig {
             extractor,
-            policy,
+            policies,
             error_handler,
             success_handler: SuccessHandler::Noop,
         }
@@ -91,7 +103,7 @@ where
     S::Future: Send + 'static,
     S::Error: Send,
     S::Response: Send,
-    Ex: ExtractKey<ReqTy, Error = E> + Clone + Send + Sync + 'static,
+    Ex: ExtractRule<ReqTy, Error = E> + Clone + Send + Sync + 'static,
     E: Into<ExtractKeyError>,
     ReqTy: Send + 'static,
     EH: Fn(Error, ReqTy) -> IntoRespTy + Clone + Send + Sync + 'static,
@@ -111,16 +123,34 @@ where
     }
 
     fn call(&mut self, req: ReqTy) -> Self::Future {
-        let key = match self.config.extractor.extract(&req) {
-            Ok(key) => key,
+        let rule = match self.config.extractor.extract(&req) {
+            Ok(rule) => rule,
             Err(e) => {
                 let e = Error::Extract(e.into());
                 let resp = (self.config.error_handler)(e, req);
                 return Box::pin(std::future::ready(Ok(resp.into())));
             }
         };
-        let cmd = Cmd::new(&key, &self.config.policy);
-        let cmd = RedisCmd::from(cmd);
+        let cmd = match rule {
+            Some(rule) => {
+                let policy = self.config.policies.get(rule.policy_name);
+                match policy {
+                    Some(policy) => {
+                        let cmd = Cmd::new(&rule.key, policy);
+                        RedisCmd::from(cmd)
+                    }
+                    None => {
+                        let e = Error::Rule(format!(
+                            "failed to apply policy for key '{}': policy '{}' not found",
+                            rule.key, rule.policy_name
+                        ));
+                        let resp = (self.config.error_handler)(e, req);
+                        return Box::pin(std::future::ready(Ok(resp.into())));
+                    }
+                }
+            }
+            None => return Box::pin(self.inner.call(req)),
+        };
         let mut connection = self.connection.clone();
         let mut inner = self.inner.clone();
         let config = self.config.clone();
