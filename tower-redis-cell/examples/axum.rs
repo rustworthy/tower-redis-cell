@@ -96,7 +96,7 @@ mod utils {
     use testcontainers::{GenericImage, core::WaitFor};
 
     pub async fn launch_redis_container() -> (ContainerAsync<GenericImage>, u16) {
-        let container = GenericImage::new("valkey-cell", "latest")
+        let container = GenericImage::new("ghcr.io/rustworthy/valkey-cell", "latest")
             .with_exposed_port(6379.tcp())
             .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
             .start()
