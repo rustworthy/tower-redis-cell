@@ -3,8 +3,8 @@ use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
 use http::header::RETRY_AFTER;
-use tower_rate_limit::redis_cell::Policy;
-use tower_rate_limit::{
+use tower_redis_cell::redis_cell::Policy;
+use tower_redis_cell::{
     Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, Rule,
 };
 
