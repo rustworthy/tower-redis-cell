@@ -1,5 +1,4 @@
-use redis::Cmd as RedisCmd;
-use redis::aio::ConnectionManager;
+use redis::{Cmd as RedisCmd, aio::ConnectionLike};
 use std::{borrow::Cow, pin::Pin, sync::Arc};
 use tower::Layer;
 
@@ -53,27 +52,27 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
 
 // ############################## SERVICE ####################################
 #[derive(Clone)]
-pub struct RateLimit<S, Ex, EH, RespTy> {
+pub struct RateLimit<S, Ex, EH, RespTy, C> {
     inner: S,
     config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
-    connection: ConnectionManager,
+    connection: C, // e.g. `ConnectionManager`
 }
 
-impl<S, Ex, EH, SH> RateLimit<S, Ex, EH, SH> {
-    pub fn new(
-        inner: S,
-        config: Arc<RateLimitConfig<Ex, EH, SH>>,
-        connection: ConnectionManager,
-    ) -> Self {
+impl<S, Ex, EH, SH, C> RateLimit<S, Ex, EH, SH, C> {
+    pub fn new<RLC>(inner: S, config: RLC, connection: C) -> Self
+    where
+        RLC: Into<Arc<RateLimitConfig<Ex, EH, SH>>>,
+    {
         RateLimit {
             inner,
-            config,
+            config: config.into(),
             connection,
         }
     }
 }
 
-impl<S, Ex, E, EH, RespTy, ReqTy, IntoRespTy> tower::Service<ReqTy> for RateLimit<S, Ex, EH, RespTy>
+impl<S, Ex, E, EH, RespTy, ReqTy, IntoRespTy, C> tower::Service<ReqTy>
+    for RateLimit<S, Ex, EH, RespTy, C>
 where
     S: tower::Service<ReqTy, Response = RespTy> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -85,6 +84,7 @@ where
     EH: Fn(Error, ReqTy) -> IntoRespTy + Clone + Send + Sync + 'static,
     IntoRespTy: Into<RespTy>,
     RespTy: 'static,
+    C: ConnectionLike + Clone + Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -112,7 +112,7 @@ where
         let mut inner = self.inner.clone();
         let config = self.config.clone();
         Box::pin(async move {
-            let redis_response = match connection.send_packed_command(&cmd).await {
+            let redis_response = match connection.req_packed_command(&cmd).await {
                 Ok(res) => res,
                 Err(redis) => {
                     let handled = (config.error_handler)(Error::Redis(Arc::new(redis)), req);
@@ -149,22 +149,25 @@ where
 }
 
 // ############################## LAYER ######################################
-pub struct RateLimitLayer<Ex, EH, RespTy> {
+pub struct RateLimitLayer<Ex, EH, RespTy, C> {
     config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
-    connection: ConnectionManager,
+    connection: C,
 }
 
-impl<S, Ex, EH, RespTy> Layer<S> for RateLimitLayer<Ex, EH, RespTy> {
-    type Service = RateLimit<S, Ex, EH, RespTy>;
+impl<S, Ex, EH, RespTy, C> Layer<S> for RateLimitLayer<Ex, EH, RespTy, C>
+where
+    C: Clone,
+{
+    type Service = RateLimit<S, Ex, EH, RespTy, C>;
     fn layer(&self, inner: S) -> Self::Service {
         RateLimit::new(inner, Arc::clone(&self.config), self.connection.clone())
     }
 }
 
-impl<Ex, EH, RespTy> RateLimitLayer<Ex, EH, RespTy> {
-    pub fn new<C>(config: C, connection: ConnectionManager) -> Self
+impl<Ex, EH, RespTy, C> RateLimitLayer<Ex, EH, RespTy, C> {
+    pub fn new<RLC>(config: RLC, connection: C) -> Self
     where
-        C: Into<Arc<RateLimitConfig<Ex, EH, RespTy>>>,
+        RLC: Into<Arc<RateLimitConfig<Ex, EH, RespTy>>>,
     {
         RateLimitLayer {
             config: config.into(),

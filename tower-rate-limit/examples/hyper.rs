@@ -1,3 +1,5 @@
+//use deadpool_redis::redis::{FromRedisValue, cmd};
+//use deadpool_redis::{Config, Runtime};
 use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
@@ -55,6 +57,10 @@ async fn main() {
     let manager = redis::aio::ConnectionManager::new_with_config(client, config)
         .await
         .unwrap();
+
+    //let mut cfg = Config::from_url(format!("redis://localhost:{}", port));
+    //let pool = cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
+    //let conn = pool.get().await.unwrap();
 
     // We'll bind to 127.0.0.1:3000
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));

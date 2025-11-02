@@ -10,6 +10,7 @@ redis-cell-rs = { path = "../redis-cell" }
 tower = "0.5.2"
 
 [dev-dependencies]
+deadpool-redis = "0.22.0"
 hyper = { version = "0.14", features = ["full"] }
 testcontainers = { version = "0.25.0", features = ["reusable-containers"] }
 tokio = { version = "1.48.0", features = ["macros"] }
