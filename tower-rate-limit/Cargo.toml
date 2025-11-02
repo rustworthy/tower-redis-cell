@@ -11,8 +11,9 @@ thiserror = "2.0.17"
 tower = "0.5.2"
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }
 axum = "0.8.6"
 deadpool-redis = "0.22.0"
-hyper = { version = "0.14", features = ["full"] }
 testcontainers = { version = "0.25.0", features = ["reusable-containers"] }
 tokio = { version = "1.48.0", features = ["macros"] }
+tracing = "0.1.41"

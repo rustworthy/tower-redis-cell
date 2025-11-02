@@ -1,31 +1,17 @@
 use axum::http::Request;
 use axum::http::{HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
+use http::header::RETRY_AFTER;
 use std::borrow::Cow;
 use std::time::Duration;
 use tower_rate_limit::redis_cell::Policy;
 use tower_rate_limit::{Error, ExtractKey, ExtractKeyError, RateLimitConfig, RateLimitLayer};
 
 #[derive(Clone)]
-struct IpExtractor;
+struct ApiKeyExtractor;
 
-#[derive(Debug)]
-struct AppError(String);
-
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        (StatusCode::OK, self.0).into_response()
-    }
-}
-
-impl From<AppError> for Response<Body> {
-    fn from(value: AppError) -> Self {
-        value.into_response()
-    }
-}
-
-impl<T> ExtractKey<Request<T>> for IpExtractor {
+impl<T> ExtractKey<Request<T>> for ApiKeyExtractor {
     type Error = ExtractKeyError;
     fn extract<'a>(&self, req: &'a Request<T>) -> Result<Cow<'a, str>, Self::Error> {
         req.headers()
@@ -40,6 +26,11 @@ impl<T> ExtractKey<Request<T>> for IpExtractor {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    // launch a contaier with
     let (_container, port) = utils::launch_redis_container().await;
     let connection = utils::build_connection_manager(port).await;
 
@@ -49,14 +40,30 @@ async fn main() {
         .period(Duration::from_secs(3))
         .build();
 
-    let config = RateLimitConfig::new(IpExtractor, policy, |err, _req| {
-        eprintln!("{}", err);
+    let config = RateLimitConfig::new(ApiKeyExtractor, policy, |err, _req| {
         match err {
-            Error::Throttle(_details) => AppError("rate-limited".to_string()),
-            Error::Extract(err) => AppError(format!("uanuthoized: {:?}", err.detail)),
-            Error::RedisCell(err) => AppError(format!("internal server error: {}", err)),
-            Error::Redis(err) => AppError(format!("internal server error: {:?}", err.detail())),
-            _ => AppError("internal server error".into()),
+            Error::Throttle(details) => {
+                // trace event
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
+                    AppendHeaders([(RETRY_AFTER, details.retry_after)]),
+                )
+                    .into_response()
+            }
+            Error::Extract(err) => (StatusCode::UNAUTHORIZED, err.to_string()).into_response(),
+            Error::RedisCell(err) => {
+                tracing::error!(err = %err, "error in rate limit layer");
+                (StatusCode::INTERNAL_SERVER_ERROR).into_response()
+            }
+            Error::Redis(err) => {
+                tracing::error!(err = %err, "error in rate limit layer");
+                (StatusCode::INTERNAL_SERVER_ERROR).into_response()
+            }
+            _ => {
+                tracing::error!("error in rate limit layer");
+                (StatusCode::INTERNAL_SERVER_ERROR).into_response()
+            }
         }
     })
     .on_success(|_details, resp: &mut Response<Body>| {
