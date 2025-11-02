@@ -51,11 +51,24 @@ impl<Ex, EH, RespTy> RateLimitConfig<Ex, EH, RespTy> {
 }
 
 // ############################## SERVICE ####################################
-#[derive(Clone)]
 pub struct RateLimit<S, Ex, EH, RespTy, C> {
     inner: S,
     config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
     connection: C, // e.g. `ConnectionManager`
+}
+
+impl<S, Ex, EH, RespTy, C> Clone for RateLimit<S, Ex, EH, RespTy, C>
+where
+    S: Clone,
+    C: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            config: Arc::clone(&self.config),
+            connection: self.connection.clone(),
+        }
+    }
 }
 
 impl<S, Ex, EH, SH, C> RateLimit<S, Ex, EH, SH, C> {
@@ -152,6 +165,18 @@ where
 pub struct RateLimitLayer<Ex, EH, RespTy, C> {
     config: Arc<RateLimitConfig<Ex, EH, RespTy>>,
     connection: C,
+}
+
+impl<Ex, EH, RespTy, C> Clone for RateLimitLayer<Ex, EH, RespTy, C>
+where
+    C: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            connection: self.connection.clone(),
+        }
+    }
 }
 
 impl<S, Ex, EH, RespTy, C> Layer<S> for RateLimitLayer<Ex, EH, RespTy, C>
