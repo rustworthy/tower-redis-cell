@@ -9,7 +9,10 @@ pub use redis_cell_rs as redis_cell;
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
 
-type ReponseEnricher<RespTy> = Arc<dyn Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static>;
+type SyncSuccessHandler<RespTy> = Box<dyn Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static>;
+
+type SyncErrorHandler<ReqTy, IntoRespTy> =
+    Box<dyn Fn(Error, ReqTy) -> IntoRespTy + Send + Sync + 'static>;
 
 #[derive(Debug, Clone)]
 pub struct Rule<'a> {
@@ -29,25 +32,30 @@ pub trait ProvideRule<R> {
     fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
 }
 
-#[derive(Clone)]
-enum SuccessHandler<RespTy> {
+enum OnSuccess<RespTy> {
     Noop,
-    Handler(ReponseEnricher<RespTy>),
+    Sync(SyncSuccessHandler<RespTy>),
 }
 
-#[derive(Clone)]
-pub struct RateLimitConfig<PR, EH, RespTy> {
+enum OnError<ReqTy, IntoRespTy> {
+    Sync(SyncErrorHandler<ReqTy, IntoRespTy>),
+}
+
+pub struct RateLimitConfig<PR, ReqTy, RespTy, IntoRespTy> {
     rule_provider: PR,
-    error_handler: EH,
-    success_handler: SuccessHandler<RespTy>,
+    on_error: OnError<ReqTy, IntoRespTy>,
+    on_success: OnSuccess<RespTy>,
 }
 
-impl<RP, EH, RespTy> RateLimitConfig<RP, EH, RespTy> {
-    pub fn new(rule_provider: RP, error_handler: EH) -> Self {
+impl<RP, ReqTy, RespTy, IntoRespTy> RateLimitConfig<RP, ReqTy, RespTy, IntoRespTy> {
+    pub fn new<EH>(rule_provider: RP, error_handler: EH) -> Self
+    where
+        EH: Fn(Error, ReqTy) -> IntoRespTy + Send + Sync + 'static,
+    {
         RateLimitConfig {
             rule_provider,
-            error_handler,
-            success_handler: SuccessHandler::Noop,
+            on_error: OnError::Sync(Box::new(error_handler)),
+            on_success: OnSuccess::Noop,
         }
     }
 
@@ -55,19 +63,19 @@ impl<RP, EH, RespTy> RateLimitConfig<RP, EH, RespTy> {
     where
         H: Fn(AllowedDetails, &mut RespTy) + Send + Sync + 'static,
     {
-        self.success_handler = SuccessHandler::Handler(Arc::new(handler));
+        self.on_success = OnSuccess::Sync(Box::new(handler));
         self
     }
 }
 
 // ############################## SERVICE ####################################
-pub struct RateLimit<S, PR, EH, RespTy, C> {
+pub struct RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C> {
     inner: S,
-    config: Arc<RateLimitConfig<PR, EH, RespTy>>,
+    config: Arc<RateLimitConfig<PR, ReqTy, RespTy, IntoRespTy>>,
     connection: C, // e.g. `ConnectionManager`
 }
 
-impl<S, PR, EH, RespTy, C> Clone for RateLimit<S, PR, EH, RespTy, C>
+impl<S, PR, ReqTy, RespTy, IntoRespTy, C> Clone for RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C>
 where
     S: Clone,
     C: Clone,
@@ -81,10 +89,10 @@ where
     }
 }
 
-impl<S, PR, EH, SH, C> RateLimit<S, PR, EH, SH, C> {
+impl<S, PR, ReqTy, RespTy, IntoRespTy, C> RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C> {
     pub fn new<RLC>(inner: S, config: RLC, connection: C) -> Self
     where
-        RLC: Into<Arc<RateLimitConfig<PR, EH, SH>>>,
+        RLC: Into<Arc<RateLimitConfig<PR, ReqTy, RespTy, IntoRespTy>>>,
     {
         RateLimit {
             inner,
@@ -94,18 +102,17 @@ impl<S, PR, EH, SH, C> RateLimit<S, PR, EH, SH, C> {
     }
 }
 
-impl<S, PR, E, EH, RespTy, ReqTy, IntoRespTy, C> tower::Service<ReqTy>
-    for RateLimit<S, PR, EH, RespTy, C>
+impl<S, PR, IntoPRErr, ReqTy, RespTy, IntoRespTy, C> tower::Service<ReqTy>
+    for RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C>
 where
     S: tower::Service<ReqTy, Response = RespTy> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Send,
     S::Response: Send,
-    PR: ProvideRule<ReqTy, Error = E> + Clone + Send + Sync + 'static,
-    E: Into<ProvideRuleError>,
+    PR: ProvideRule<ReqTy, Error = IntoPRErr> + Clone + Send + Sync + 'static,
+    IntoPRErr: Into<ProvideRuleError>,
     ReqTy: Send + 'static,
-    EH: Fn(Error, ReqTy) -> IntoRespTy + Clone + Send + Sync + 'static,
-    IntoRespTy: Into<RespTy>,
+    IntoRespTy: Into<RespTy> + 'static,
     RespTy: 'static,
     C: ConnectionLike + Clone + Send + 'static,
 {
@@ -125,7 +132,8 @@ where
             Ok(rule) => rule,
             Err(e) => {
                 let e = Error::Rule(e.into());
-                let resp = (self.config.error_handler)(e, req);
+                let OnError::Sync(ref h) = self.config.on_error;
+                let resp = h(e, req);
                 return Box::pin(std::future::ready(Ok(resp.into())));
             }
         };
@@ -143,29 +151,32 @@ where
             let redis_response = match connection.req_packed_command(&cmd).await {
                 Ok(res) => res,
                 Err(redis) => {
-                    let handled = (config.error_handler)(Error::Redis(Arc::new(redis)), req);
+                    let OnError::Sync(ref h) = config.on_error;
+                    let handled = h(Error::Redis(Arc::new(redis)), req);
                     return Ok(handled.into());
                 }
             };
             let redis_cell_verdict: Verdict = match redis_response.try_into() {
                 Ok(verdict) => verdict,
                 Err(message) => {
-                    let handled = (config.error_handler)(Error::RedisCell(message), req);
+                    let OnError::Sync(ref h) = config.on_error;
+                    let handled = h(Error::RedisCell(message), req);
                     return Ok(handled.into());
                 }
             };
             match redis_cell_verdict {
                 Verdict::Blocked(details) => {
-                    let handled = (config.error_handler)(Error::Throttle(details), req);
+                    let OnError::Sync(ref h) = config.on_error;
+                    let handled = h(Error::Throttle(details), req);
                     Ok(handled.into())
                 }
                 Verdict::Allowed(details) => {
                     inner
                         .call(req)
                         .await
-                        .map(|mut resp| match &config.success_handler {
-                            SuccessHandler::Noop => resp,
-                            SuccessHandler::Handler(h) => {
+                        .map(|mut resp| match &config.on_success {
+                            OnSuccess::Noop => resp,
+                            OnSuccess::Sync(h) => {
                                 h(details, &mut resp);
                                 resp
                             }
@@ -177,12 +188,12 @@ where
 }
 
 // ############################## LAYER ######################################
-pub struct RateLimitLayer<PR, EH, RespTy, C> {
-    config: Arc<RateLimitConfig<PR, EH, RespTy>>,
+pub struct RateLimitLayer<PR, ReqTy, RespTy, IntoRespTy, C> {
+    config: Arc<RateLimitConfig<PR, ReqTy, RespTy, IntoRespTy>>,
     connection: C,
 }
 
-impl<PR, EH, RespTy, C> Clone for RateLimitLayer<PR, EH, RespTy, C>
+impl<PR, ReqTy, RespTy, IntoRespTy, C> Clone for RateLimitLayer<PR, ReqTy, RespTy, IntoRespTy, C>
 where
     C: Clone,
 {
@@ -194,20 +205,21 @@ where
     }
 }
 
-impl<S, PR, EH, RespTy, C> Layer<S> for RateLimitLayer<PR, EH, RespTy, C>
+impl<S, PR, ReqTy, RespTy, IntoRespTy, C> Layer<S>
+    for RateLimitLayer<PR, ReqTy, RespTy, IntoRespTy, C>
 where
     C: Clone,
 {
-    type Service = RateLimit<S, PR, EH, RespTy, C>;
+    type Service = RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C>;
     fn layer(&self, inner: S) -> Self::Service {
         RateLimit::new(inner, Arc::clone(&self.config), self.connection.clone())
     }
 }
 
-impl<PR, EH, RespTy, C> RateLimitLayer<PR, EH, RespTy, C> {
+impl<PR, ReqTy, RespTy, IntoRespTy, C> RateLimitLayer<PR, ReqTy, RespTy, IntoRespTy, C> {
     pub fn new<RLC>(config: RLC, connection: C) -> Self
     where
-        RLC: Into<Arc<RateLimitConfig<PR, EH, RespTy>>>,
+        RLC: Into<Arc<RateLimitConfig<PR, ReqTy, RespTy, IntoRespTy>>>,
     {
         RateLimitLayer {
             config: config.into(),

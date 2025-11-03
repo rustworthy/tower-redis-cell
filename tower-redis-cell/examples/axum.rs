@@ -1,8 +1,6 @@
-use axum::http::Request;
-use axum::http::{HeaderValue, Method, StatusCode};
+use axum::http::{HeaderValue, Method, Request, StatusCode, header};
 use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
-use http::header::RETRY_AFTER;
 use tower_redis_cell::redis_cell::Policy;
 use tower_redis_cell::{
     Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, Rule,
@@ -50,7 +48,7 @@ async fn main() {
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
-                    AppendHeaders([(RETRY_AFTER, details.retry_after)]),
+                    AppendHeaders([(header::RETRY_AFTER, details.retry_after)]),
                     Body::from("too many requests"),
                 )
                     .into_response()
