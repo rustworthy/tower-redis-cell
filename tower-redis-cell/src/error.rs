@@ -1,7 +1,6 @@
+use crate::rule::RequestBlockedDetails;
 use redis::RedisError;
-use redis_cell_rs::BlockedDetails;
 use redis_cell_rs::Error as RedisCellError;
-use redis_cell_rs::Policy;
 use std::fmt::Display;
 use std::{borrow::Cow, sync::Arc};
 
@@ -42,17 +41,9 @@ impl From<&'static str> for ProvideRuleError {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
-#[non_exhaustive]
-#[error("request blocked and can be retied after {} second(s)", .details.retry_after)]
-pub struct RequestThrottledError {
-    pub details: BlockedDetails,
-    pub policy: Policy,
-}
-
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum Error {
+pub enum Error<'a> {
     #[error("rule: {0}")]
     Rule(ProvideRuleError),
 
@@ -62,6 +53,6 @@ pub enum Error {
     #[error(transparent)]
     Redis(Arc<RedisError>),
 
-    #[error("rate-limited: {0}")]
-    RateLimit(RequestThrottledError),
+    #[error("request blocked for key {} and can be retied after {} second(s)", .0.key, .0.details.retry_after)]
+    RateLimit(RequestBlockedDetails<'a>),
 }

@@ -1,37 +1,15 @@
 use redis::aio::ConnectionLike;
-use std::{borrow::Cow, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 use tower::Layer;
 
 mod error;
+mod rule;
 
-pub use error::{Error, ProvideRuleError, RequestThrottledError};
+pub use error::{Error, ProvideRuleError};
 pub use redis_cell_rs as redis_cell;
+pub use rule::{ProvideRule, RequestAllowedDetails, RequestBlockedDetails, Rule};
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
-
-#[derive(Debug, Clone)]
-pub struct Rule<'a> {
-    key: Cow<'a, str>,
-    policy: Policy,
-}
-
-impl<'a> Rule<'a> {
-    pub fn new<K>(key: K, policy: Policy) -> Self
-    where
-        K: Into<Cow<'a, str>>,
-    {
-        Self {
-            key: key.into(),
-            policy,
-        }
-    }
-}
-
-pub trait ProvideRule<R> {
-    type Error;
-
-    fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
-}
 
 // ############################### HANDLERS ##################################
 type SyncSuccessHandler<RespTy> =
@@ -40,7 +18,7 @@ type SyncSuccessHandler<RespTy> =
 type SyncUnruledHandler<RespTy> = Box<dyn Fn(&mut RespTy) + Send + Sync + 'static>;
 
 type SyncErrorHandler<ReqTy, IntoRespTy> =
-    Box<dyn Fn(Error, ReqTy) -> IntoRespTy + Send + Sync + 'static>;
+    Box<dyn Fn(Error, &ReqTy) -> IntoRespTy + Send + Sync + 'static>;
 
 enum OnSuccess<RespTy> {
     Noop,
@@ -67,7 +45,7 @@ pub struct RateLimitConfig<PR, ReqTy, RespTy, IntoRespTy> {
 impl<RP, ReqTy, RespTy, IntoRespTy> RateLimitConfig<RP, ReqTy, RespTy, IntoRespTy> {
     pub fn new<EH>(rule_provider: RP, error_handler: EH) -> Self
     where
-        EH: Fn(Error, ReqTy) -> IntoRespTy + Send + Sync + 'static,
+        EH: Fn(Error, &ReqTy) -> IntoRespTy + Send + Sync + 'static,
     {
         RateLimitConfig {
             rule_provider,
@@ -164,7 +142,7 @@ where
                 Err(e) => {
                     let e = Error::Rule(e.into());
                     let OnError::Sync(ref h) = config.on_error;
-                    let resp = h(e, req);
+                    let resp = h(e, &req);
                     return Ok(resp.into());
                 }
             };
@@ -190,7 +168,7 @@ where
                 Ok(res) => res,
                 Err(redis) => {
                     let OnError::Sync(ref h) = config.on_error;
-                    let handled = h(Error::Redis(Arc::new(redis)), req);
+                    let handled = h(Error::Redis(Arc::new(redis)), &req);
                     return Ok(handled.into());
                 }
             };
@@ -198,7 +176,7 @@ where
                 Ok(verdict) => verdict,
                 Err(message) => {
                     let OnError::Sync(ref h) = config.on_error;
-                    let handled = h(Error::RedisCell(message), req);
+                    let handled = h(Error::RedisCell(message), &req);
                     return Ok(handled.into());
                 }
             };
@@ -206,8 +184,12 @@ where
                 Verdict::Blocked(details) => {
                     let OnError::Sync(ref h) = config.on_error;
                     let handled = h(
-                        Error::RateLimit(RequestThrottledError { details, policy }),
-                        req,
+                        Error::RateLimit(RequestBlockedDetails {
+                            key: &rule.key,
+                            policy,
+                            details,
+                        }),
+                        &req,
                     );
                     Ok(handled.into())
                 }
