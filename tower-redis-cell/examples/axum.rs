@@ -3,23 +3,24 @@ use axum::response::{AppendHeaders, IntoResponse, Response};
 use axum::{Router, body::Body, routing::get};
 use tower_redis_cell::redis_cell::Policy;
 use tower_redis_cell::{
-    Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, Rule,
+    Error, ProvideRule, ProvideRuleError, RateLimitConfig, RateLimitLayer, RequestThrottledError,
+    Rule,
 };
 
-const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1);
-const STRICT_POLICY: Policy = Policy::from_tokens_per_hour(5);
+const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1).name("basic");
+const STRICT_POLICY: Policy = Policy::from_tokens_per_hour(5).name("strict");
 
 #[derive(Clone)]
 struct RuleProvider;
 
 impl<T> ProvideRule<Request<T>> for RuleProvider {
     type Error = ProvideRuleError;
+
     fn provide<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, Self::Error> {
         let key = req
             .headers()
             .get("x-api-key")
             .and_then(|val| val.to_str().ok())
-            .map(Into::into)
             .ok_or(ProvideRuleError::with_detail(
                 "cannot define key, since 'x-api-key' header is missing".into(),
             ))?;
@@ -44,11 +45,12 @@ async fn main() {
 
     let config = RateLimitConfig::new(RuleProvider, |err, _req| {
         match err {
-            Error::Throttle(details) => {
+            Error::RateLimit(err) => {
+                tracing::warn!(err = %err, policy = err.policy.name, "request throttled");
                 (
                     StatusCode::TOO_MANY_REQUESTS,
                     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After
-                    AppendHeaders([(header::RETRY_AFTER, details.retry_after)]),
+                    AppendHeaders([(header::RETRY_AFTER, err.details.retry_after)]),
                     Body::from("too many requests"),
                 )
                     .into_response()

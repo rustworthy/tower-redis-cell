@@ -11,15 +11,24 @@ pub struct Policy {
     pub period: Duration,
 
     pub apply: usize,
+
+    pub name: Option<&'static str>,
 }
 
 impl Policy {
-    pub const fn new(burst: usize, tokens: usize, period: Duration, apply: usize) -> Policy {
+    pub const fn new(
+        burst: usize,
+        tokens: usize,
+        period: Duration,
+        apply: usize,
+        name: Option<&'static str>,
+    ) -> Policy {
         Self {
             burst,
             tokens,
             period,
             apply,
+            name,
         }
     }
 
@@ -40,7 +49,7 @@ impl Policy {
     }
 
     pub const fn from_tokens_per_period(tokens: usize, period: Duration) -> Policy {
-        Policy::new(0, tokens, period, 1)
+        Policy::new(0, tokens, period, 1, None)
     }
 
     pub const fn max_burst(mut self, burst: usize) -> Policy {
@@ -50,6 +59,11 @@ impl Policy {
 
     pub const fn apply_tokens(mut self, apply: usize) -> Policy {
         self.apply = apply;
+        self
+    }
+
+    pub const fn name(mut self, name: &'static str) -> Policy {
+        self.name = Some(name);
         self
     }
 }

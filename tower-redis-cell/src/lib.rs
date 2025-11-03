@@ -4,7 +4,7 @@ use tower::Layer;
 
 mod error;
 
-pub use error::{Error, ProvideRuleError};
+pub use error::{Error, ProvideRuleError, RequestThrottledError};
 pub use redis_cell_rs as redis_cell;
 
 use redis_cell::{AllowedDetails, Cmd, Policy, Verdict};
@@ -21,8 +21,14 @@ pub struct Rule<'a> {
 }
 
 impl<'a> Rule<'a> {
-    pub fn new(key: Cow<'a, str>, policy: Policy) -> Self {
-        Self { key, policy }
+    pub fn new<K>(key: K, policy: Policy) -> Self
+    where
+        K: Into<Cow<'a, str>>,
+    {
+        Self {
+            key: key.into(),
+            policy,
+        }
     }
 }
 
@@ -128,7 +134,7 @@ where
     }
 
     fn call(&mut self, req: ReqTy) -> Self::Future {
-        let rule = match self.config.rule_provider.provide(&req) {
+        let maybe_rule = match self.config.rule_provider.provide(&req) {
             Ok(rule) => rule,
             Err(e) => {
                 let e = Error::Rule(e.into());
@@ -137,16 +143,17 @@ where
                 return Box::pin(std::future::ready(Ok(resp.into())));
             }
         };
-        let cmd = match rule {
-            Some(rule) => {
-                let cmd = Cmd::new(&rule.key, &rule.policy);
-                RedisCmd::from(cmd)
-            }
+        let rule = match maybe_rule {
+            Some(rule) => rule,
             None => return Box::pin(self.inner.call(req)),
         };
+        let cmd = Cmd::new(&rule.key, &rule.policy);
+        let cmd = RedisCmd::from(cmd);
+
         let mut connection = self.connection.clone();
         let mut inner = self.inner.clone();
         let config = self.config.clone();
+        let policy = rule.policy;
         Box::pin(async move {
             let redis_response = match connection.req_packed_command(&cmd).await {
                 Ok(res) => res,
@@ -167,7 +174,10 @@ where
             match redis_cell_verdict {
                 Verdict::Blocked(details) => {
                     let OnError::Sync(ref h) = config.on_error;
-                    let handled = h(Error::Throttle(details), req);
+                    let handled = h(
+                        Error::RateLimit(RequestThrottledError { details, policy }),
+                        req,
+                    );
                     Ok(handled.into())
                 }
                 Verdict::Allowed(details) => {

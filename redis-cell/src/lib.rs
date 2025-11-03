@@ -27,7 +27,7 @@ mod tests {
         let mut client = redis::aio::ConnectionManager::new_with_config(client, config)
             .await
             .unwrap();
-        let policy = Policy::new(1, 10, Duration::from_secs(60), 1);
+        let policy = Policy::new(1, 10, Duration::from_secs(60), 1, None);
         let cmd = Cmd::new("user123", &policy).into();
         let verdict: Verdict = client
             .send_packed_command(&cmd)
