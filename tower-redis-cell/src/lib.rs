@@ -35,8 +35,8 @@
 //! and an error handler), procure a Valkey/Redis client and use those to create
 //! [RateLimitLayer]. Note that we are using [`ConnectionManager`](redis::aio::ConnectionManager)
 //! in this example, but dy default anything [`ConnectionLike`](https://docs.rs/redis/latest/redis/aio/trait.ConnectionLike.html)
-//! will do. There is also an option to use a pool, but you will need to  enable
-//! the `deadpool` feature for that.
+//! will do. There is also an option to use a pool, but you will need to enable
+//! a corresponding feature for that (currently, `deadpool` is supported).
 //!
 //!```no_run
 //! # use axum::http::Request;
@@ -118,7 +118,7 @@ pub use rule::{
 pub use service::{RateLimit, RateLimitLayer};
 
 #[cfg(feature = "deadpool")]
-pub mod pooled {
+pub mod deadpool {
     pub use crate::service::deadpool::{RateLimit, RateLimitLayer};
 }
 

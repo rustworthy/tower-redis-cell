@@ -36,7 +36,7 @@ async fn main() {
     // launch a contaier with Valkey (with Redis Cell module)
     let (_container, port) = utils::launch_redis_container().await;
 
-    let config = RateLimitConfig::new(RuleProvider, |err, _req| {
+    let rate_limit_config = RateLimitConfig::new(RuleProvider, |err, _req| {
         match err {
             Error::ProvideRule(err) => {
                 tracing::warn!(
@@ -95,15 +95,26 @@ async fn main() {
 
     #[cfg(feature = "deadpool")]
     let app = {
-        let pool = utils::procure_connection(port).await;
-        let layer = tower_redis_cell::pooled::RateLimitLayer::new(config, pool);
+        use deadpool_redis::{Config, Runtime};
+        use tower_redis_cell::deadpool::RateLimitLayer;
+
+        let cfg = Config::from_url(format!("redis://localhost:{}", port));
+        let pool = cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
+        let layer = RateLimitLayer::new(rate_limit_config, pool);
         app.layer(layer)
     };
 
     #[cfg(not(feature = "deadpool"))]
     let app = {
-        let connection = utils::procure_connection(port).await;
-        let layer = tower_redis_cell::RateLimitLayer::new(config, connection);
+        use redis::{Client, aio::ConnectionManager, aio::ConnectionManagerConfig};
+        use tower_redis_cell::RateLimitLayer;
+
+        let client = Client::open(("localhost", port)).unwrap();
+        let cfg = ConnectionManagerConfig::new().set_number_of_retries(1);
+        let connection = ConnectionManager::new_with_config(client, cfg)
+            .await
+            .unwrap();
+        let layer = RateLimitLayer::new(rate_limit_config, connection);
         app.layer(layer)
     };
 
@@ -127,22 +138,5 @@ mod utils {
             .unwrap();
         let port = container.get_host_port_ipv4(6379).await.unwrap();
         (container, port)
-    }
-
-    #[cfg(not(feature = "deadpool"))]
-    pub async fn procure_connection(port: u16) -> redis::aio::ConnectionManager {
-        let client = redis::Client::open(("localhost", port)).unwrap();
-        let config = redis::aio::ConnectionManagerConfig::new().set_number_of_retries(1);
-        redis::aio::ConnectionManager::new_with_config(client, config)
-            .await
-            .unwrap()
-    }
-
-    #[cfg(feature = "deadpool")]
-    pub async fn procure_connection(port: u16) -> deadpool_redis::Pool {
-        use deadpool_redis::{Config, Runtime};
-
-        let cfg = Config::from_url(format!("redis://localhost:{}", port));
-        cfg.create_pool(Some(Runtime::Tokio1)).unwrap()
     }
 }
