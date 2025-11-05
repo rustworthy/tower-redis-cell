@@ -28,7 +28,7 @@ impl<'a> Rule<'a> {
 }
 
 pub trait ProvideRule<R> {
-    fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, ProvideRuleError>;
+    fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, ProvideRuleError<'a>>;
 }
 
 #[derive(Debug, Clone)]

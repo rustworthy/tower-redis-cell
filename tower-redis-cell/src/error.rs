@@ -6,11 +6,12 @@ use std::{borrow::Cow, sync::Arc};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct ProvideRuleError {
-    pub detail: Option<Cow<'static, str>>,
+pub struct ProvideRuleError<'a> {
+    pub key: Option<Cow<'a, str>>,
+    pub detail: Option<Cow<'a, str>>,
 }
 
-impl Display for ProvideRuleError {
+impl Display for ProvideRuleError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("failed to provide rule")?;
         if let Some(ref detail) = self.detail {
@@ -21,23 +22,41 @@ impl Display for ProvideRuleError {
     }
 }
 
-impl ProvideRuleError {
-    pub fn with_detail(detail: Cow<'static, str>) -> Self {
-        ProvideRuleError {
-            detail: Some(detail),
-        }
+impl<'a> ProvideRuleError<'a> {
+    pub fn new<K, D>(key: K, detail: D) -> Self
+    where
+        K: Into<Cow<'a, str>>,
+        D: Into<Cow<'a, str>>,
+    {
+        Self::default().key(key).detail(detail)
+    }
+
+    pub fn detail<D>(mut self, detail: D) -> Self
+    where
+        D: Into<Cow<'a, str>>,
+    {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    pub fn key<K>(mut self, key: K) -> Self
+    where
+        K: Into<Cow<'a, str>>,
+    {
+        self.key = Some(key.into());
+        self
     }
 }
 
-impl From<String> for ProvideRuleError {
+impl From<String> for ProvideRuleError<'_> {
     fn from(value: String) -> Self {
-        ProvideRuleError::with_detail(value.into())
+        ProvideRuleError::default().detail(value)
     }
 }
 
-impl From<&'static str> for ProvideRuleError {
-    fn from(value: &'static str) -> Self {
-        ProvideRuleError::with_detail(value.into())
+impl<'a> From<&'a str> for ProvideRuleError<'a> {
+    fn from(value: &'a str) -> Self {
+        ProvideRuleError::default().detail(value)
     }
 }
 
@@ -45,7 +64,7 @@ impl From<&'static str> for ProvideRuleError {
 #[non_exhaustive]
 pub enum Error<'a> {
     #[error("rule: {0}")]
-    Rule(ProvideRuleError),
+    ProvideRule(ProvideRuleError<'a>),
 
     #[error(transparent)]
     RedisCell(RedisCellError),

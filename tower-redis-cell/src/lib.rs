@@ -140,7 +140,7 @@ where
                 Ok(rule) => rule,
                 Err(e) => {
                     let OnError::Sync(ref h) = config.on_error;
-                    let resp = h(Error::Rule(e), &req);
+                    let resp = h(Error::ProvideRule(e), &req);
                     return Ok(resp.into());
                 }
             };
