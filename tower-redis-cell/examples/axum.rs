@@ -42,7 +42,7 @@ async fn main() {
 
     // launch a contaier with Valkey (with Redis Cell module)
     let (_container, port) = utils::launch_redis_container().await;
-    let connection = utils::build_connection_manager(port).await;
+    let connection = utils::procure_connection(port).await;
 
     let config = RateLimitConfig::new(RuleProvider, |err, _req| {
         match err {
@@ -109,7 +109,6 @@ async fn main() {
 }
 
 mod utils {
-    use redis::aio::ConnectionManager;
     use testcontainers::ContainerAsync;
     use testcontainers::core::IntoContainerPort as _;
     use testcontainers::runners::AsyncRunner;
@@ -126,11 +125,20 @@ mod utils {
         (container, port)
     }
 
-    pub async fn build_connection_manager(port: u16) -> ConnectionManager {
+    #[cfg(not(feature = "deadpool"))]
+    pub async fn procure_connection(port: u16) -> ConnectionManager {
         let client = redis::Client::open(("localhost", port)).unwrap();
         let config = redis::aio::ConnectionManagerConfig::new().set_number_of_retries(1);
         redis::aio::ConnectionManager::new_with_config(client, config)
             .await
             .unwrap()
+    }
+
+    #[cfg(feature = "deadpool")]
+    pub async fn procure_connection(port: u16) -> deadpool_redis::Pool {
+        use deadpool_redis::{Config, Runtime};
+
+        let cfg = Config::from_url(format!("redis://localhost:{}", port));
+        cfg.create_pool(Some(Runtime::Tokio1)).unwrap()
     }
 }
