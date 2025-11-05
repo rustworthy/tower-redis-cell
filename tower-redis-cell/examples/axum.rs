@@ -14,9 +14,7 @@ const STRICT_POLICY: Policy = Policy::from_tokens_per_hour(5).name("strict");
 struct RuleProvider;
 
 impl<T> ProvideRule<Request<T>> for RuleProvider {
-    type Error = ProvideRuleError;
-
-    fn provide<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, Self::Error> {
+    fn provide<'a>(&self, req: &'a Request<T>) -> Result<Option<Rule<'a>>, ProvideRuleError> {
         let key = req
             .headers()
             .get("x-api-key")

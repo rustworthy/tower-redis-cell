@@ -1,4 +1,4 @@
-use crate::key::Key;
+use crate::{ProvideRuleError, key::Key};
 use redis_cell_rs::{AllowedDetails, BlockedDetails, Policy};
 
 #[derive(Debug, Clone)]
@@ -28,9 +28,7 @@ impl<'a> Rule<'a> {
 }
 
 pub trait ProvideRule<R> {
-    type Error;
-
-    fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, Self::Error>;
+    fn provide<'a>(&self, req: &'a R) -> Result<Option<Rule<'a>>, ProvideRuleError>;
 }
 
 #[derive(Debug, Clone)]

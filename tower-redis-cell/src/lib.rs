@@ -106,15 +106,14 @@ impl<S, PR, ReqTy, RespTy, IntoRespTy, C> RateLimit<S, PR, ReqTy, RespTy, IntoRe
     }
 }
 
-impl<S, PR, IntoPRErr, ReqTy, RespTy, IntoRespTy, C> tower::Service<ReqTy>
+impl<S, PR, ReqTy, RespTy, IntoRespTy, C> tower::Service<ReqTy>
     for RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C>
 where
     S: tower::Service<ReqTy, Response = RespTy> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Send,
     S::Response: Send,
-    PR: ProvideRule<ReqTy, Error = IntoPRErr> + Clone + Send + Sync + 'static,
-    IntoPRErr: Into<ProvideRuleError>,
+    PR: ProvideRule<ReqTy> + Clone + Send + Sync + 'static,
     ReqTy: Send + 'static,
     IntoRespTy: Into<RespTy> + 'static,
     RespTy: 'static,
@@ -140,9 +139,8 @@ where
             let maybe_rule = match config.rule_provider.provide(&req) {
                 Ok(rule) => rule,
                 Err(e) => {
-                    let e = Error::Rule(e.into());
                     let OnError::Sync(ref h) = config.on_error;
-                    let resp = h(e, &req);
+                    let resp = h(Error::Rule(e), &req);
                     return Ok(resp.into());
                 }
             };
