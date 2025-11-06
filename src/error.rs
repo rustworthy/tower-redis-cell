@@ -3,7 +3,6 @@ use crate::rule::RequestBlockedDetails;
 #[cfg(feature = "deadpool")]
 use deadpool_redis::PoolError;
 use redis::RedisError;
-use redis_cell_rs::Error as RedisCellError;
 use std::borrow::Cow;
 use std::fmt::Display;
 
@@ -68,9 +67,6 @@ impl<'a> From<&'a str> for ProvideRuleError<'a> {
 pub enum Error<'a> {
     #[error("rule: {0}")]
     ProvideRule(ProvideRuleError<'a>),
-
-    #[error(transparent)]
-    RedisCell(#[from] RedisCellError),
 
     #[error(transparent)]
     Redis(#[from] RedisError),

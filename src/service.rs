@@ -1,8 +1,9 @@
 use crate::config;
 use crate::error::Error;
 use crate::rule;
-use redis::aio::ConnectionLike;
+use redis::{FromRedisValue, aio::ConnectionLike};
 pub use redis_cell_rs as redis_cell;
+use redis_cell_rs::Verdict;
 use std::{pin::Pin, sync::Arc};
 
 pub struct RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C> {
@@ -102,11 +103,11 @@ where
                     return Ok(handled.into());
                 }
             };
-            let redis_cell_verdict = match redis_response.try_into() {
+            let redis_cell_verdict = match Verdict::from_redis_value(&redis_response) {
                 Ok(verdict) => verdict,
-                Err(message) => {
+                Err(redis_err) => {
                     let config::OnError::Sync(ref h) = config.on_error;
-                    let handled = h(Error::RedisCell(message), &req);
+                    let handled = h(Error::Redis(redis_err), &req);
                     return Ok(handled.into());
                 }
             };
@@ -189,8 +190,9 @@ pub mod deadpool {
     use crate::config;
     use crate::error::Error;
     use crate::rule;
-    use redis::aio::ConnectionLike;
+    use redis::{FromRedisValue, aio::ConnectionLike};
     pub use redis_cell_rs as redis_cell;
+    use redis_cell_rs::Verdict;
     use std::{pin::Pin, sync::Arc};
 
     pub struct RateLimit<S, PR, ReqTy, RespTy, IntoRespTy> {
@@ -297,11 +299,11 @@ pub mod deadpool {
                         return Ok(handled.into());
                     }
                 };
-                let redis_cell_verdict = match redis_response.try_into() {
+                let redis_cell_verdict = match Verdict::from_redis_value(&redis_response) {
                     Ok(verdict) => verdict,
-                    Err(message) => {
+                    Err(redis_err) => {
                         let config::OnError::Sync(ref h) = config.on_error;
-                        let handled = h(Error::RedisCell(message), &req);
+                        let handled = h(Error::Redis(redis_err), &req);
                         return Ok(handled.into());
                     }
                 };

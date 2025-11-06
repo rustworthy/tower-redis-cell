@@ -62,10 +62,6 @@ async fn main() {
                 )
                     .into_response()
             }
-            Error::RedisCell(err) => {
-                tracing::error!(err = %err, "error in rate limit layer");
-                (StatusCode::INTERNAL_SERVER_ERROR).into_response()
-            }
             Error::Redis(err) => {
                 tracing::error!(err = %err, "error in rate limit layer");
                 (StatusCode::INTERNAL_SERVER_ERROR).into_response()
