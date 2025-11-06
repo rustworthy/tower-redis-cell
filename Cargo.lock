@@ -2051,7 +2051,7 @@ checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
 
 [[package]]
 name = "tower-redis-cell"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "deadpool-redis",

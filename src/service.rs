@@ -3,7 +3,6 @@ use crate::error::Error;
 use crate::rule;
 use redis::{FromRedisValue, aio::ConnectionLike};
 pub use redis_cell_rs as redis_cell;
-use redis_cell_rs::Verdict;
 use std::{pin::Pin, sync::Arc};
 
 pub struct RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C> {
@@ -103,7 +102,7 @@ where
                     return Ok(handled.into());
                 }
             };
-            let redis_cell_verdict = match Verdict::from_redis_value(&redis_response) {
+            let redis_cell_verdict = match redis_cell::Verdict::from_redis_value(&redis_response) {
                 Ok(verdict) => verdict,
                 Err(redis_err) => {
                     let config::OnError::Sync(ref h) = config.on_error;
