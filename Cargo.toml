@@ -2,6 +2,19 @@
 name = "tower-redis-cell"
 version = "0.1.0"
 edition = "2024"
+authors = ["Pavel Mikhalkevich <pavel@mikhalkevich.com>"]
+license = "MIT OR Apache-2.0"
+description = "Rust bindings for the Redis Cell module"
+repository = "https://github.com/rustworthy/tower-redis-cell.git"
+keywords = ["Tower", "Redis", "Redis-Cell", "GCRA", "Rate-Limit"]
+categories = ["network-programming", "web-programming"]
+exclude = [
+  ".github",
+  "redis.Dockerfile",
+  "valkey.Dockerfile",
+  ".gitignore",
+  "Makefile",
+]
 
 [features]
 deadpool = ["dep:deadpool-redis"]
