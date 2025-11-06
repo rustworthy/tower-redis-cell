@@ -17,6 +17,8 @@ exclude = [
 ]
 
 [features]
+default = ["tokio-comp"]
+tokio-comp = ["redis/tokio-comp"]
 deadpool = ["dep:deadpool-redis"]
 uuid = ["dep:uuid", "redis/uuid"]
 
