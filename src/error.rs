@@ -1,8 +1,8 @@
-use crate::key::Key;
 use crate::rule::RequestBlockedDetails;
 #[cfg(feature = "deadpool")]
 use deadpool_redis::PoolError;
 use redis::RedisError;
+use redis_cell_rs::Key;
 use std::borrow::Cow;
 use std::fmt::Display;
 
