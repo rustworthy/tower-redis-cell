@@ -1378,6 +1378,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1387,6 +1388,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a19ad57f203fd5dac22b5289546093af885c099a51b9f4c146ef0c7c17d90c67"
 dependencies = [
  "redis",
+ "uuid",
 ]
 
 [[package]]
@@ -2212,6 +2214,16 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
+
+[[package]]
+name = "uuid"
+version = "1.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "valuable"

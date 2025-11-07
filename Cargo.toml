@@ -20,6 +20,7 @@ exclude = [
 default = ["tokio-comp"]
 tokio-comp = ["redis/tokio-comp"]
 deadpool = ["dep:deadpool-redis"]
+uuid = ["redis-cell-rs/uuid"]
 
 [dependencies]
 tower = "0.5.2"

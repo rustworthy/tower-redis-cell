@@ -15,7 +15,7 @@ doc:
 
 .PHONY: test
 test: ## Run tests
-	cargo t
+	cargo t --all-features
 
 .PHONY: test/doc
 test/doc: ## Run doc tests
