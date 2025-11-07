@@ -11,23 +11,36 @@
 //! and - optionally - a resource name (useful for tracing, debugging, audit).
 //!
 //!```
-//! use axum::http::Request;
-//! use tower_redis_cell::redis_cell::Policy;
+//! use axum::http::{Request, Method};
+//! use tower_redis_cell::redis_cell::{Key, Policy};
 //! use tower_redis_cell::{ProvideRule, ProvideRuleResult, Rule};
 //!
 //! const BASIC_POLICY: Policy = Policy::from_tokens_per_second(1);
+//! const STRICT_POLICY: Policy = Policy::from_tokens_per_day(5).max_burst(5);
 //!
 //! #[derive(Clone)]
 //! struct RuleProvider;
 //!
 //! impl<T> ProvideRule<Request<T>> for RuleProvider {
 //!     fn provide<'a>(&self, req: &'a Request<T>) -> ProvideRuleResult<'a> {
-//!         let key = req
+//!         let api_key = req
 //!             .headers()
 //!             .get("x-api-key")
 //!             .and_then(|val| val.to_str().ok())
 //!             .ok_or("cannot define key, since 'x-api-key' header is missing")?;
-//!         Ok(Some(Rule::new(key, BASIC_POLICY)))
+//!
+//!         let (path, method) = (req.uri().path(), req.method());
+//!
+//!         let rule = if path.contains("/embed") &&
+//!             (method == Method::POST || method == Method::PUT) {
+//!             let key = Key::triple(api_key, path, method.as_str());
+//!             let rule = Rule::new(key, STRICT_POLICY).resource("embeddings::create");
+//!             return Ok(Some(rule));
+//!         } else {
+//!             Rule::new(api_key, BASIC_POLICY)
+//!         };
+//!
+//!         Ok(Some(rule))
 //!    }
 //! }
 //!```
@@ -50,7 +63,7 @@
 //!
 //! use axum::http::{StatusCode, header};
 //! use axum::response::{AppendHeaders, IntoResponse, Response};
-//! use axum::{Router, body::Body, routing::get};
+//! use axum::{Router, body::Body, routing::get, routing::post};
 //! use tower_redis_cell::{Error, RateLimitLayer, RateLimitConfig};
 //!
 //! #[tokio::main]
@@ -97,6 +110,7 @@
 //!
 //!     let app = Router::new()
 //!         .route("/", get(|| async { "Hello, World!" }))
+//!         .route("/embded", post(|| async { "Create embeddings" }))
 //!         .layer(RateLimitLayer::new(config, connection));
 //!
 //!     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -113,13 +127,11 @@
 
 mod config;
 mod error;
-mod key;
 mod rule;
 mod service;
 
 pub use config::RateLimitConfig;
 pub use error::{Error, ProvideRuleError};
-pub use key::Key;
 pub use rule::{
     ProvideRule, ProvideRuleResult, RequestAllowedDetails, RequestBlockedDetails, Rule,
 };

@@ -1,5 +1,5 @@
-use crate::{ProvideRuleError, key::Key};
-use redis_cell_rs::{AllowedDetails, BlockedDetails, Policy};
+use crate::ProvideRuleError;
+use redis_cell_rs::{AllowedDetails, BlockedDetails, Key, Policy};
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]

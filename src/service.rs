@@ -289,7 +289,6 @@ pub mod deadpool {
                         return Ok(handled.into());
                     }
                 };
-
                 let redis_response = match connection.req_packed_command(&cmd.into()).await {
                     Ok(res) => res,
                     Err(redis_err) => {
