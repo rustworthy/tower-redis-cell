@@ -3,7 +3,6 @@ use crate::error::Error;
 use crate::rule;
 use redis::{FromRedisValue, aio::ConnectionLike};
 pub use redis_cell_rs as redis_cell;
-use std::future::Future;
 use std::{pin::Pin, sync::Arc};
 
 pub struct RateLimit<S, PR, ReqTy, RespTy, IntoRespTy, C> {
@@ -193,7 +192,6 @@ pub mod deadpool {
     use redis::{FromRedisValue, aio::ConnectionLike};
     pub use redis_cell_rs as redis_cell;
     use redis_cell_rs::Verdict;
-    use std::future::Future;
     use std::{pin::Pin, sync::Arc};
 
     pub struct RateLimit<S, PR, ReqTy, RespTy, IntoRespTy> {
