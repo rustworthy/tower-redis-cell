@@ -1,5 +1,9 @@
 # tower-redis-cell
 
+[![Crates.io](https://img.shields.io/crates/v/tower-redis-cell.svg)](https://crates.io/crates/tower-redis-cell)
+[![Documentation](https://img.shields.io/docsrs/tower-redis-cell/latest)](https://docs.rs/tower-redis-cell/)
+[![dependency status](https://deps.rs/repo/github/rustworthy/tower-redis-cell/status.svg)](https://deps.rs/repo/github/rustworthy/tower-redis-cell)
+
 ## Description
 
 This crate provides a `Tower` service with rate-limiting functionality

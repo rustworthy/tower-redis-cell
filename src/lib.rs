@@ -7,7 +7,7 @@
 //! example using [`axum`](https://github.com/tokio-rs/axum).
 //!
 //! First, let's define [`Rule`] provider: the rule is defined per request, and
-//! contains [`Key`] (e.g. IP, API key, user ID), [`redis_cell::Policy`],
+//! contains [`redis_cell_rs::Key`] (e.g. IP, API key, user ID), [`redis_cell::Policy`],
 //! and - optionally - a resource name (useful for tracing, debugging, audit).
 //!
 //!```
