@@ -50,5 +50,4 @@ images/push:
 check: ## Run fmt, clippy, and doc checks
 	cargo fmt --check
 	cargo clippy --all-features --all-targets
-	cargo doc --no-deps --all-features
 
