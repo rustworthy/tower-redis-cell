@@ -112,7 +112,10 @@ jobs:
       # intentionally no target specifier; see https://github.com/jonhoo/rust-ci-conf/pull/4
       # --feature-powerset runs for every combination of features
       - name: cargo hack
-        run: cargo hack --feature-powerset check
+        # we are expecting async `ConnectionLike` which implies using the `aio` feature
+        # of the `Redis` crate expects a runtime (tokio, async-std-comp, or smol-comp),
+        # so we are enabling `tokio-comp` by default, so that `Redis` builds
+        run: cargo hack --feature-powerset --exclude-no-default-features check
   msrv:
     # check that we can build using the minimal rust version that is specified by this crate
     runs-on: ubuntu-latest
