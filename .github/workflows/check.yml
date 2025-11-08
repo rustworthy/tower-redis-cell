@@ -115,7 +115,7 @@ jobs:
         # we are expecting async `ConnectionLike` which implies using the `aio` feature
         # of the `Redis` crate expects a runtime (tokio, async-std-comp, or smol-comp),
         # so we are enabling `tokio-comp` by default, so that `Redis` builds
-        run: cargo hack --feature-powerset --exclude-no-default-features check
+        run: cargo hack --feature-powerset --features tokio-comp check
   msrv:
     # check that we can build using the minimal rust version that is specified by this crate
     runs-on: ubuntu-latest
