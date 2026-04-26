@@ -102,11 +102,11 @@ where
                     return Ok(handled.into());
                 }
             };
-            let redis_cell_verdict = match redis_cell::Verdict::from_redis_value(&redis_response) {
+            let redis_cell_verdict = match redis_cell::Verdict::from_redis_value(redis_response) {
                 Ok(verdict) => verdict,
-                Err(redis_err) => {
+                Err(parsing_error) => {
                     let config::OnError::Sync(ref h) = config.on_error;
-                    let handled = h(Error::Redis(redis_err), &req);
+                    let handled = h(Error::Redis(parsing_error.into()), &req);
                     return Ok(handled.into());
                 }
             };
@@ -297,11 +297,11 @@ pub mod deadpool {
                         return Ok(handled.into());
                     }
                 };
-                let redis_cell_verdict = match Verdict::from_redis_value(&redis_response) {
+                let redis_cell_verdict = match Verdict::from_redis_value(redis_response) {
                     Ok(verdict) => verdict,
-                    Err(redis_err) => {
+                    Err(parsing_error) => {
                         let config::OnError::Sync(ref h) = config.on_error;
-                        let handled = h(Error::Redis(redis_err), &req);
+                        let handled = h(Error::Redis(parsing_error.into()), &req);
                         return Ok(handled.into());
                     }
                 };
