@@ -1,6 +1,6 @@
 [package]
 name = "tower-redis-cell"
-version = "0.2.1-rc.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Pavel Mikhalkevich <pavel@mikhalkevich.com>"]
 license = "MIT OR Apache-2.0"
@@ -25,17 +25,17 @@ uuid = ["redis-cell-rs/uuid"]
 [dependencies]
 tower = "0.5.2"
 thiserror = "2.0.17"
-redis = { version = "0.32.7", features = ["aio"] }
-redis-cell-rs = "0.2.0"
+redis = { version = "1", features = ["aio"] }
+redis-cell-rs = "0.3"
 
 # optional dependencies
-deadpool-redis = { version = "0.22.0", optional = true }
+deadpool-redis = { version = "0.23", optional = true }
 
 [dev-dependencies]
-redis = { version = "0.32.7", features = ["connection-manager", "tokio-comp"] }
+redis = { version = "1", features = ["connection-manager", "tokio-comp"] }
 tracing-subscriber = { version = "0.3.20", features = ["fmt", "env-filter"] }
 axum = "0.8.6"
-testcontainers = { version = "0.26.0", features = ["reusable-containers"] }
+testcontainers = { version = "0.27.3", features = ["reusable-containers"] }
 tokio = { version = "1.48.0", features = ["macros"] }
 tracing = "0.1.41"
 
